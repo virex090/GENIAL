@@ -63,11 +63,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     session.append({"role": "user", "content": user_input})
 
     try:
-        response = openai.ChatCompletion.create(
+        client = openai.OpenAI()
+        response = client.chat.completions.create(
             model="gpt-4",
             messages=[{"role": "system", "content": "You are a helpful assistant."}] + session,
         )
-        reply = response['choices'][0]['message']['content'].strip()
+        reply = response.choices[0].message.content.strip()
         session.append({"role": "assistant", "content": reply})
         save_session(user_id, session)
         await update.message.reply_text(reply)
@@ -90,11 +91,14 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     audio.export(wav_path, format="wav")
 
     try:
+        client = openai.OpenAI()
         with open(wav_path, "rb") as audio_file:
-            transcript = openai.Audio.transcribe("whisper-1", audio_file)
-            user_text = transcript["text"]
-            # Directly call handle_message logic with user_text
-            # Create a fake update.message object with text
+            transcript = client.audio.transcriptions.create(
+                model="whisper-1",
+                file=audio_file
+            )
+            user_text = transcript.text
+
             class FakeMessage:
                 def __init__(self, text):
                     self.text = text
@@ -121,4 +125,3 @@ if __name__ == "__main__":
 
     print("🤖 Bot is running...")
     app.run_polling()
-
