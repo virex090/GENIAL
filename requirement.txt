@@ -1,0 +1,6 @@
+python-telegram-bot==20.3
+openai
+python-dotenv
+redis
+pydub
+ffmpeg-python

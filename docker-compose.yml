@@ -1,0 +1,11 @@
+version: '3.9'
+services:
+  bot:
+    build: .
+    env_file: .env
+    depends_on:
+      - redis
+  redis:
+    image: redis:latest
+    ports:
+      - "6379:6379"
