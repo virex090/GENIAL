@@ -1,10 +1,10 @@
 import os
-import openai
-import redis
 import json
+import redis
 import tempfile
 from dotenv import load_dotenv
 from pydub import AudioSegment
+from openai import OpenAI
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -17,9 +17,12 @@ from telegram.ext import (
 
 # Load environment variables
 load_dotenv()
-openai.api_key = os.getenv("OPENAI_API_KEY")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+# OpenAI client
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 # Connect to Redis
 rdb = redis.Redis.from_url(REDIS_URL, decode_responses=True)
@@ -32,22 +35,26 @@ def load_session(user_id):
     return []
 
 def save_session(user_id, session):
-    # Save only last 10 messages to limit context
     rdb.set(f"session:{user_id}", json.dumps(session[-10:]))
 
-# Start command
+# /start command
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton("Reset Memory", callback_data="reset")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text("Hi! I'm your AI assistant. Ask me anything.", reply_markup=reply_markup)
 
-# Reset command
+# /reset command
 async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     rdb.delete(f"session:{user_id}")
-    await update.message.reply_text("✅ Memory cleared.")
 
-# Callback for inline buttons
+    if update.message:
+        await update.message.reply_text("✅ Memory cleared.")
+    elif update.callback_query and update.callback_query.message:
+        await update.callback_query.message.reply_text("✅ Memory cleared.")
+
+
+# Inline button callback
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -63,7 +70,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     session.append({"role": "user", "content": user_input})
 
     try:
-        client = openai.OpenAI()
         response = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[{"role": "system", "content": "You are a helpful assistant."}] + session,
@@ -76,7 +82,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print("OpenAI Error:", e)
         await update.message.reply_text("⚠️ Error occurred. Try again.")
 
-# Handle voice input
+# Handle voice messages
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     voice = update.message.voice
@@ -91,7 +97,6 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     audio.export(wav_path, format="wav")
 
     try:
-        client = openai.OpenAI()
         with open(wav_path, "rb") as audio_file:
             transcript = client.audio.transcriptions.create(
                 model="whisper-1",
@@ -113,7 +118,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print("Whisper Error:", e)
         await update.message.reply_text("❌ Couldn't process voice message.")
 
-# Main entrypoint
+# Entrypoint
 if __name__ == "__main__":
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
@@ -125,3 +130,4 @@ if __name__ == "__main__":
 
     print("🤖 Bot is running...")
     app.run_polling()
+
