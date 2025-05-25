@@ -7,8 +7,12 @@ from dotenv import load_dotenv
 from pydub import AudioSegment
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, MessageHandler,
-    ContextTypes, filters
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    ContextTypes,
+    filters,
 )
 
 # Load environment variables
@@ -28,6 +32,7 @@ def load_session(user_id):
     return []
 
 def save_session(user_id, session):
+    # Save only last 10 messages to limit context
     rdb.set(f"session:{user_id}", json.dumps(session[-10:]))
 
 # Start command
@@ -56,12 +61,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     session = load_session(user_id)
     session.append({"role": "user", "content": user_input})
-    save_session(user_id, session)
 
     try:
         response = openai.ChatCompletion.create(
             model="gpt-4",
-            messages=[{"role": "system", "content": "You are a helpful assistant."}] + session
+            messages=[{"role": "system", "content": "You are a helpful assistant."}] + session,
         )
         reply = response['choices'][0]['message']['content'].strip()
         session.append({"role": "assistant", "content": reply})
@@ -89,13 +93,23 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         with open(wav_path, "rb") as audio_file:
             transcript = openai.Audio.transcribe("whisper-1", audio_file)
             user_text = transcript["text"]
-            update.message.text = user_text  # simulate message
-            await handle_message(update, context)
+            # Directly call handle_message logic with user_text
+            # Create a fake update.message object with text
+            class FakeMessage:
+                def __init__(self, text):
+                    self.text = text
+                    self.from_user = update.message.from_user
+                    self.chat = update.message.chat
+                async def reply_text(self, txt):
+                    await update.message.reply_text(txt)
+
+            fake_update = Update(update.update_id, message=FakeMessage(user_text))
+            await handle_message(fake_update, context)
     except Exception as e:
         print("Whisper Error:", e)
         await update.message.reply_text("❌ Couldn't process voice message.")
 
-# Run bot
+# Main entrypoint
 if __name__ == "__main__":
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
@@ -103,8 +117,8 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("reset", reset))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
-    app.add_handler(MessageHandler(filters.COMMAND, reset))
-    app.add_handler(MessageHandler(filters.UpdateType.CALLBACK_QUERY, handle_callback))
+    app.add_handler(CallbackQueryHandler(handle_callback))
 
     print("🤖 Bot is running...")
     app.run_polling()
+
